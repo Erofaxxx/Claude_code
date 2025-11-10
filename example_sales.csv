@@ -1,0 +1,31 @@
+date,product,category,price,quantity,customer_id,region
+2024-01-01,Laptop,Electronics,999.99,2,C001,North
+2024-01-02,Mouse,Electronics,29.99,5,C002,South
+2024-01-03,Keyboard,Electronics,79.99,3,C003,East
+2024-01-04,Monitor,Electronics,299.99,1,C001,North
+2024-01-05,Desk,Furniture,399.99,1,C004,West
+2024-01-06,Chair,Furniture,199.99,2,C002,South
+2024-01-07,Laptop,Electronics,999.99,1,C005,North
+2024-01-08,Mouse,Electronics,29.99,10,C006,East
+2024-01-09,Notebook,Stationery,9.99,20,C007,West
+2024-01-10,Pen,Stationery,1.99,50,C008,South
+2024-01-11,Desk Lamp,Furniture,49.99,5,C009,North
+2024-01-12,USB Cable,Electronics,14.99,8,C010,East
+2024-01-13,Laptop,Electronics,999.99,3,C011,West
+2024-01-14,Chair,Furniture,199.99,4,C012,South
+2024-01-15,Monitor,Electronics,299.99,2,C013,North
+2024-01-16,Keyboard,Electronics,79.99,6,C001,East
+2024-01-17,Mouse,Electronics,29.99,7,C014,West
+2024-01-18,Desk,Furniture,399.99,2,C015,South
+2024-01-19,Notebook,Stationery,9.99,15,C002,North
+2024-01-20,Pen,Stationery,1.99,40,C016,East
+2024-01-21,Laptop,Electronics,999.99,1,C017,West
+2024-01-22,Desk Lamp,Furniture,49.99,3,C018,South
+2024-01-23,USB Cable,Electronics,14.99,12,C019,North
+2024-01-24,Monitor,Electronics,299.99,2,C020,East
+2024-01-25,Chair,Furniture,199.99,3,C003,West
+2024-01-26,Keyboard,Electronics,79.99,4,C021,South
+2024-01-27,Mouse,Electronics,29.99,9,C022,North
+2024-01-28,Laptop,Electronics,999.99,2,C023,East
+2024-01-29,Desk,Furniture,399.99,1,C004,West
+2024-01-30,Notebook,Stationery,9.99,25,C024,South
