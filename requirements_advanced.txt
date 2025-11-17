@@ -1,0 +1,18 @@
+# Дополнительные зависимости для расширенной версии
+
+# Основные зависимости API
+-r requirements_api.txt
+
+# WebSocket поддержка
+websockets>=12.0
+
+# Redis для сессий
+redis>=5.0.0
+aioredis>=2.0.1
+
+# Celery для очередей задач
+celery[redis]>=5.3.0
+flower>=2.0.1
+
+# Дополнительно
+python-json-logger>=2.0.0

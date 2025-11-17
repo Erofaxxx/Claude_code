@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # Redis для сессий и Celery
+  redis:
+    image: redis:7-alpine
+    container_name: csvagent_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Celery Worker
+  celery_worker:
+    build: .
+    container_name: csvagent_celery_worker
+    command: celery -A celery_config worker --loglevel=info
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    volumes:
+      - .:/app
+    restart: unless-stopped
+
+  # Flower для мониторинга Celery (опционально)
+  flower:
+    build: .
+    container_name: csvagent_flower
+    command: celery -A celery_config flower --port=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery_worker
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    restart: unless-stopped
+
+  # API Server (опционально, можно запускать отдельно)
+  # api:
+  #   build: .
+  #   container_name: csvagent_api
+  #   command: python api_server_advanced.py
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     - redis
+  #     - celery_worker
+  #   environment:
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #     - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+  #   volumes:
+  #     - .:/app
+  #   restart: unless-stopped
+
+volumes:
+  redis_data:
