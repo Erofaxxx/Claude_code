@@ -169,10 +169,13 @@ class CSVAnalysisAgentAPI:
                 elif isinstance(result, (np.integer, np.floating)):
                     result = float(result)
                 elif isinstance(result, str) and '\n' in result:
-                    # Автоматически конвертируем строки с переносами в список
-                    # Это улучшит отображение на фронтенде
+                    # Умная конвертация: только если это похоже на список элементов
                     lines = [line.strip() for line in result.split('\n') if line.strip()]
-                    if len(lines) > 1:  # Если это действительно список, а не просто текст
+                    # Конвертируем только если:
+                    # - Больше 3 строк (список, а не просто 2 строки текста)
+                    # - Все строки короткие (<150 символов - не параграфы)
+                    # Иначе это текстовый вывод, который нужно сохранить как есть
+                    if len(lines) > 3 and all(len(line) < 150 for line in lines):
                         result = lines
 
                 # Сохраняем графики в base64

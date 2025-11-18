@@ -140,10 +140,12 @@ const renderResultData = (resultData: any) => {
     );
   }
 
-  // Если это строка с переносами строк - конвертируем в список
+  // Если это строка с переносами строк - умная обработка
   if (typeof resultData === 'string' && resultData.includes('\n')) {
     const lines = resultData.split('\n').filter(line => line.trim());
-    if (lines.length > 1) {
+
+    // Если это список (много коротких строк) - показываем как список
+    if (lines.length > 3 && lines.every(line => line.length < 150)) {
       return (
         <div className="my-2">
           <p className="text-sm text-gray-600 mb-2">📊 Найденные элементы ({lines.length}):</p>
@@ -152,6 +154,17 @@ const renderResultData = (resultData: any) => {
               <li key={idx} className="text-gray-800">{line.trim()}</li>
             ))}
           </ul>
+        </div>
+      );
+    }
+
+    // Если это текст (длинные строки или мало строк) - показываем как текст
+    if (lines.length > 1) {
+      return (
+        <div className="my-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <pre className="whitespace-pre-wrap text-sm text-gray-800 font-sans">
+            {resultData}
+          </pre>
         </div>
       );
     }
