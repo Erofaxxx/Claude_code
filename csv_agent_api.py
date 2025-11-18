@@ -154,7 +154,14 @@ class CSVAnalysisAgentAPI:
 
                 # Конвертируем результат в JSON-serializable формат
                 if isinstance(result, pd.DataFrame):
-                    result = result.to_dict(orient='records')
+                    # Возвращаем DataFrame с метаданными для правильного отображения таблиц
+                    result = {
+                        "type": "dataframe",
+                        "data": result.to_dict(orient='records'),
+                        "columns": result.columns.tolist(),
+                        "shape": {"rows": int(result.shape[0]), "columns": int(result.shape[1])},
+                        "dtypes": {col: str(dtype) for col, dtype in result.dtypes.items()}
+                    }
                 elif isinstance(result, pd.Series):
                     result = result.to_dict()
                 elif isinstance(result, np.ndarray):
