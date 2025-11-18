@@ -183,7 +183,19 @@ class CSVAnalysisAgentAPI:
                 output = stdout_capture.getvalue()
 
                 # Конвертируем результат в JSON-serializable формат
-                if isinstance(result, pd.DataFrame):
+                if isinstance(result, list) and len(result) > 0 and isinstance(result[0], pd.DataFrame):
+                    # Список DataFrame - конвертируем каждый в формат с метаданными
+                    result = [
+                        {
+                            "type": "dataframe",
+                            "data": df_item.to_dict(orient='records'),
+                            "columns": df_item.columns.tolist(),
+                            "shape": {"rows": int(df_item.shape[0]), "columns": int(df_item.shape[1])},
+                            "dtypes": {col: str(dtype) for col, dtype in df_item.dtypes.items()}
+                        }
+                        for df_item in result
+                    ]
+                elif isinstance(result, pd.DataFrame):
                     # Возвращаем DataFrame с метаданными для правильного отображения таблиц
                     result = {
                         "type": "dataframe",
@@ -290,11 +302,13 @@ class CSVAnalysisAgentAPI:
 13. Для одного значения возвращай число или строку
 14. НИКОГДА не используй '\\n'.join() для результата - всегда возвращай list
 15. Для нескольких связанных результатов используй DataFrame (НЕ вложенные словари)
-16. Примеры правильного формата:
+16. Для нескольких НЕСВЯЗАННЫХ таблиц возвращай список DataFrame: result = [df1, df2]
+17. Примеры правильного формата:
     - Список штатов: result = df['State'].unique().tolist()  # ✅ ПРАВИЛЬНО
     - НЕ ДЕЛАЙ ТАК: result = '\\n'.join(states)  # ❌ НЕПРАВИЛЬНО
     - Несколько результатов: result = pd.DataFrame([{...}, {...}])  # ✅ ПРАВИЛЬНО
     - НЕ ДЕЛАЙ ТАК: result = {"Заказ 1": {...}, "Заказ 2": {...}}  # ❌ НЕПРАВИЛЬНО (вложенные объекты)
+    - Несколько таблиц: result = [df.head(), data_sample.head()]  # ✅ ПРАВИЛЬНО (список DataFrame)
 """
 
         # Добавляем информацию о дополнительных файлах в промпт

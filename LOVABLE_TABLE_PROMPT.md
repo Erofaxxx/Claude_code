@@ -45,6 +45,51 @@ const renderResultData = (resultData: any) => {
   // Если нет данных
   if (!resultData) return null;
 
+  // Если это массив таблиц - отображаем каждую
+  if (Array.isArray(resultData) && resultData.length > 0 && resultData[0].type === "dataframe") {
+    return (
+      <div className="space-y-4">
+        {resultData.map((tableData: any, idx: number) => (
+          <div key={idx} className="overflow-x-auto rounded-lg border border-gray-200">
+            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+              <p className="text-sm text-gray-600">
+                📊 Таблица {idx + 1}: {tableData.shape.rows} строк × {tableData.shape.columns} столбцов
+              </p>
+            </div>
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  {tableData.columns.map((col: string, colIdx: number) => (
+                    <th
+                      key={colIdx}
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {tableData.data.map((row: any, rowIdx: number) => (
+                  <tr key={rowIdx} className="hover:bg-gray-50">
+                    {tableData.columns.map((col: string, colIdx: number) => (
+                      <td
+                        key={colIdx}
+                        className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"
+                      >
+                        {row[col] !== null && row[col] !== undefined ? String(row[col]) : '-'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   // Проверяем, является ли это DataFrame
   if (resultData.type === "dataframe" && resultData.data) {
     const { data, columns, shape } = resultData;
