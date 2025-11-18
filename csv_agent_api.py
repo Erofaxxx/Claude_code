@@ -45,6 +45,7 @@ class CSVAnalysisAgentAPI:
 
         self.model = "anthropic/claude-sonnet-4.5"
         self.current_df = None
+        self.dataframes = {}  # Хранилище для множественных DataFrame: {filename: df}
         self.max_retries = 3
 
         # Настройки для графиков
@@ -58,7 +59,7 @@ class CSVAnalysisAgentAPI:
 
         Args:
             file_bytes: Байты CSV файла
-            filename: Имя файла (для отладки)
+            filename: Имя файла
 
         Returns:
             DataFrame с данными
@@ -66,9 +67,34 @@ class CSVAnalysisAgentAPI:
         try:
             df = pd.read_csv(io.BytesIO(file_bytes))
             self.current_df = df
+            # Сохраняем в хранилище множественных файлов
+            clean_name = Path(filename).stem  # Убираем расширение
+            self.dataframes[clean_name] = df
             return df
         except Exception as e:
-            raise Exception(f"Ошибка при загрузке CSV файла: {str(e)}")
+            raise Exception(f"Ошибка при загрузке CSV файла '{filename}': {str(e)}")
+
+    def load_multiple_csv(self, files_data: List[Tuple[bytes, str]]) -> Dict[str, pd.DataFrame]:
+        """
+        Загрузить несколько CSV файлов одновременно
+
+        Args:
+            files_data: Список кортежей (file_bytes, filename)
+
+        Returns:
+            Словарь {filename: DataFrame}
+        """
+        loaded = {}
+        for file_bytes, filename in files_data:
+            df = self.load_csv_from_bytes(file_bytes, filename)
+            clean_name = Path(filename).stem
+            loaded[clean_name] = df
+
+        # Первый файл - основной
+        if files_data:
+            self.current_df = loaded[Path(files_data[0][1]).stem]
+
+        return loaded
 
     def load_csv_from_file(self, file_path: str) -> pd.DataFrame:
         """
@@ -123,7 +149,7 @@ class CSVAnalysisAgentAPI:
 
         Args:
             code: Python код для выполнения
-            df: DataFrame для работы
+            df: DataFrame для работы (основной)
 
         Returns:
             Кортеж (успех, результат, вывод/ошибка, список base64 изображений)
@@ -136,6 +162,10 @@ class CSVAnalysisAgentAPI:
             'sns': sns,
             'result': None
         }
+
+        # Добавляем все загруженные DataFrame'ы
+        for name, dataframe in self.dataframes.items():
+            local_vars[name] = dataframe.copy()
 
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
@@ -168,6 +198,32 @@ class CSVAnalysisAgentAPI:
                     result = result.tolist()
                 elif isinstance(result, (np.integer, np.floating)):
                     result = float(result)
+                elif isinstance(result, dict):
+                    # Проверяем, есть ли вложенные объекты
+                    has_nested = any(isinstance(v, dict) for v in result.values())
+                    if has_nested:
+                        # Конвертируем вложенные объекты в DataFrame для красивого отображения
+                        try:
+                            df_from_dict = pd.DataFrame(result).T  # Транспонируем для правильного формата
+                            result = {
+                                "type": "dataframe",
+                                "data": df_from_dict.to_dict(orient='records'),
+                                "columns": df_from_dict.columns.tolist(),
+                                "shape": {"rows": int(df_from_dict.shape[0]), "columns": int(df_from_dict.shape[1])},
+                                "dtypes": {col: str(dtype) for col, dtype in df_from_dict.dtypes.items()}
+                            }
+                        except:
+                            # Если не получается конвертировать в DataFrame, оставляем как есть
+                            pass
+                elif isinstance(result, str) and '\n' in result:
+                    # Умная конвертация: только если это похоже на список элементов
+                    lines = [line.strip() for line in result.split('\n') if line.strip()]
+                    # Конвертируем только если:
+                    # - Больше 3 строк (список, а не просто 2 строки текста)
+                    # - Все строки короткие (<150 символов - не параграфы)
+                    # Иначе это текстовый вывод, который нужно сохранить как есть
+                    if len(lines) > 3 and all(len(line) < 150 for line in lines):
+                        result = lines
 
                 # Сохраняем графики в base64
                 if plt.get_fignums():
@@ -215,26 +271,57 @@ class CSVAnalysisAgentAPI:
 
 Правила:
 1. Используй только библиотеки: pandas, numpy, matplotlib, seaborn
-2. DataFrame доступен как переменная 'df'
+2. Доступные DataFrame'ы: 'df' (основной){available_dataframes}
 3. Если нужно вернуть результат, сохрани его в переменную 'result'
 4. Для визуализации используй matplotlib/seaborn
 5. Код должен быть безопасным и эффективным
 6. Всегда проверяй существование колонок перед использованием
 7. Обрабатывай возможные ошибки (NaN, типы данных и т.д.)
 8. Возвращай ТОЛЬКО код Python, без объяснений и markdown разметки
-9. Не используй print() если не требуется явный вывод
+9. **ОБЯЗАТЕЛЬНО используй print() для коротких объяснений:**
+   - Объясни ЧТО ты делаешь (1-2 предложения)
+   - Проанализируй результат (выводы, интересные находки)
+   - Пиши понятным языком, как будто объясняешь человеку
 10. Учитывай контекст предыдущих вопросов и ответов
+
+ВАЖНО - Форматирование результатов:
+11. Для списка значений ВСЕГДА возвращай list или Series (НЕ строку с \\n)
+12. Для таблиц возвращай DataFrame
+13. Для одного значения возвращай число или строку
+14. НИКОГДА не используй '\\n'.join() для результата - всегда возвращай list
+15. Для нескольких связанных результатов используй DataFrame (НЕ вложенные словари)
+16. Примеры правильного формата:
+    - Список штатов: result = df['State'].unique().tolist()  # ✅ ПРАВИЛЬНО
+    - НЕ ДЕЛАЙ ТАК: result = '\\n'.join(states)  # ❌ НЕПРАВИЛЬНО
+    - Несколько результатов: result = pd.DataFrame([{...}, {...}])  # ✅ ПРАВИЛЬНО
+    - НЕ ДЕЛАЙ ТАК: result = {"Заказ 1": {...}, "Заказ 2": {...}}  # ❌ НЕПРАВИЛЬНО (вложенные объекты)
 """
 
+        # Добавляем информацию о дополнительных файлах в промпт
+        available_dataframes_text = ""
+        if len(self.dataframes) > 1:
+            other_files = [name for name in self.dataframes.keys() if self.dataframes[name] is not self.current_df]
+            if other_files:
+                available_dataframes_text = f", {', '.join([f\"'{name}'\" for name in other_files])}"
+
+        system_prompt = system_prompt.replace("{available_dataframes}", available_dataframes_text)
+
         # Формируем сообщение с данными
+        files_info = ""
+        if len(self.dataframes) > 1:
+            files_info = "\n\nДоступные дополнительные файлы:\n"
+            for name, df_other in self.dataframes.items():
+                if df_other is not self.current_df:
+                    files_info += f"- '{name}': {df_other.shape[0]} строк, {df_other.shape[1]} колонок, колонки: {list(df_other.columns)}\n"
+
         user_message = f"""
-Данные CSV файла:
+Данные CSV файла (основной):
 - Колонки: {schema['columns']}
 - Типы данных: {schema['dtypes']}
 - Размер: {schema['shape']['rows']} строк, {schema['shape']['columns']} колонок
 - Пропущенные значения: {schema['missing_values']}
 - Примеры данных (первые 5 строк):
-{json.dumps(schema['sample_data'], indent=2, ensure_ascii=False)}
+{json.dumps(schema['sample_data'], indent=2, ensure_ascii=False)}{files_info}
 
 Запрос пользователя: {user_query}
 """

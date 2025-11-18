@@ -140,6 +140,58 @@ const renderResultData = (resultData: any) => {
     );
   }
 
+  // Если это строка с переносами строк - умная обработка
+  if (typeof resultData === 'string' && resultData.includes('\n')) {
+    const lines = resultData.split('\n').filter(line => line.trim());
+
+    // Если это список (много коротких строк) - показываем как список
+    if (lines.length > 3 && lines.every(line => line.length < 150)) {
+      return (
+        <div className="my-2">
+          <p className="text-sm text-gray-600 mb-2">📊 Найденные элементы ({lines.length}):</p>
+          <ul className="list-disc list-inside space-y-1">
+            {lines.map((line: string, idx: number) => (
+              <li key={idx} className="text-gray-800">{line.trim()}</li>
+            ))}
+          </ul>
+        </div>
+      );
+    }
+
+    // Если это текст (длинные строки или мало строк) - показываем как текст
+    if (lines.length > 1) {
+      return (
+        <div className="my-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <pre className="whitespace-pre-wrap text-sm text-gray-800 font-sans">
+            {resultData}
+          </pre>
+        </div>
+      );
+    }
+  }
+
+  // Если это простой объект (key-value пары без вложенности)
+  if (typeof resultData === 'object' && !Array.isArray(resultData) && resultData !== null) {
+    const entries = Object.entries(resultData);
+    const hasNestedObjects = entries.some(([_, value]) => typeof value === 'object' && value !== null);
+
+    // Если нет вложенных объектов - показываем как красивый список
+    if (!hasNestedObjects) {
+      return (
+        <div className="my-2 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+          <dl className="space-y-2">
+            {entries.map(([key, value], idx) => (
+              <div key={idx} className="flex flex-col sm:flex-row sm:gap-2">
+                <dt className="font-semibold text-blue-900 min-w-[200px]">{key}:</dt>
+                <dd className="text-gray-800">{String(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      );
+    }
+  }
+
   // Если это простое значение (число, строка, булево)
   if (typeof resultData === 'string' || typeof resultData === 'number' || typeof resultData === 'boolean') {
     return (

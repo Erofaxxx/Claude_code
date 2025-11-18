@@ -238,6 +238,101 @@ async def quick_analyze(
     return await analyze_csv(file=file, query=query, chat_history=None)
 
 
+@app.post("/api/analyze-multi")
+async def analyze_multiple_csv(
+    files: List[UploadFile] = File(..., description="Несколько CSV файлов для анализа"),
+    query: str = Form(..., description="Запрос пользователя для анализа данных"),
+    chat_history: Optional[str] = Form(None, description="История чата в JSON формате")
+):
+    """
+    Endpoint для анализа нескольких CSV файлов одновременно
+    Позволяет работать с данными из разных таблиц и делать перекрестный анализ
+
+    Args:
+        files: Список загруженных CSV файлов
+        query: Запрос пользователя (например, "Соедини таблицы заказов и клиентов по ID")
+        chat_history: JSON строка с историей предыдущих запросов (опционально)
+
+    Returns:
+        JSON с результатами анализа
+    """
+    try:
+        # Проверка что хотя бы один файл загружен
+        if not files:
+            raise HTTPException(
+                status_code=400,
+                detail="Необходимо загрузить хотя бы один CSV файл"
+            )
+
+        # Проверка формата всех файлов
+        for file in files:
+            if not file.filename.endswith('.csv'):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Неподдерживаемый формат файла '{file.filename}'. Требуется CSV файл."
+                )
+
+        # Чтение всех файлов
+        files_data = []
+        for file in files:
+            file_bytes = await file.read()
+            files_data.append((file_bytes, file.filename))
+
+        # Парсинг истории если есть
+        history = None
+        if chat_history:
+            import json
+            try:
+                history = json.loads(chat_history)
+            except json.JSONDecodeError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Неверный формат chat_history. Требуется валидный JSON."
+                )
+
+        # Создание агента
+        agent = CSVAnalysisAgentAPI(api_key=OPENROUTER_API_KEY)
+
+        # Загрузка всех CSV файлов
+        try:
+            loaded_dfs = agent.load_multiple_csv(files_data)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ошибка при чтении CSV файлов: {str(e)}"
+            )
+
+        # Выполнение анализа
+        result = agent.analyze(query, chat_history=history)
+
+        # Добавляем информацию о всех файлах
+        result["files_info"] = {
+            name: {
+                "filename": name + ".csv",
+                "rows": df.shape[0],
+                "columns": df.shape[1],
+                "column_names": list(df.columns)
+            }
+            for name, df in loaded_dfs.items()
+        }
+
+        return JSONResponse(content=result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_detail = {
+            "error": "Внутренняя ошибка сервера",
+            "message": str(e),
+            "traceback": traceback.format_exc(),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        return JSONResponse(
+            status_code=500,
+            content=error_detail
+        )
+
+
 # Запуск сервера
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
