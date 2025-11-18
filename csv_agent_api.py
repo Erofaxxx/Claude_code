@@ -45,6 +45,7 @@ class CSVAnalysisAgentAPI:
 
         self.model = "anthropic/claude-sonnet-4.5"
         self.current_df = None
+        self.dataframes = {}  # Хранилище для множественных DataFrame: {filename: df}
         self.max_retries = 3
 
         # Настройки для графиков
@@ -58,7 +59,7 @@ class CSVAnalysisAgentAPI:
 
         Args:
             file_bytes: Байты CSV файла
-            filename: Имя файла (для отладки)
+            filename: Имя файла
 
         Returns:
             DataFrame с данными
@@ -66,9 +67,34 @@ class CSVAnalysisAgentAPI:
         try:
             df = pd.read_csv(io.BytesIO(file_bytes))
             self.current_df = df
+            # Сохраняем в хранилище множественных файлов
+            clean_name = Path(filename).stem  # Убираем расширение
+            self.dataframes[clean_name] = df
             return df
         except Exception as e:
-            raise Exception(f"Ошибка при загрузке CSV файла: {str(e)}")
+            raise Exception(f"Ошибка при загрузке CSV файла '{filename}': {str(e)}")
+
+    def load_multiple_csv(self, files_data: List[Tuple[bytes, str]]) -> Dict[str, pd.DataFrame]:
+        """
+        Загрузить несколько CSV файлов одновременно
+
+        Args:
+            files_data: Список кортежей (file_bytes, filename)
+
+        Returns:
+            Словарь {filename: DataFrame}
+        """
+        loaded = {}
+        for file_bytes, filename in files_data:
+            df = self.load_csv_from_bytes(file_bytes, filename)
+            clean_name = Path(filename).stem
+            loaded[clean_name] = df
+
+        # Первый файл - основной
+        if files_data:
+            self.current_df = loaded[Path(files_data[0][1]).stem]
+
+        return loaded
 
     def load_csv_from_file(self, file_path: str) -> pd.DataFrame:
         """
@@ -123,7 +149,7 @@ class CSVAnalysisAgentAPI:
 
         Args:
             code: Python код для выполнения
-            df: DataFrame для работы
+            df: DataFrame для работы (основной)
 
         Returns:
             Кортеж (успех, результат, вывод/ошибка, список base64 изображений)
@@ -136,6 +162,10 @@ class CSVAnalysisAgentAPI:
             'sns': sns,
             'result': None
         }
+
+        # Добавляем все загруженные DataFrame'ы
+        for name, dataframe in self.dataframes.items():
+            local_vars[name] = dataframe.copy()
 
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
@@ -241,14 +271,17 @@ class CSVAnalysisAgentAPI:
 
 Правила:
 1. Используй только библиотеки: pandas, numpy, matplotlib, seaborn
-2. DataFrame доступен как переменная 'df'
+2. Доступные DataFrame'ы: 'df' (основной){available_dataframes}
 3. Если нужно вернуть результат, сохрани его в переменную 'result'
 4. Для визуализации используй matplotlib/seaborn
 5. Код должен быть безопасным и эффективным
 6. Всегда проверяй существование колонок перед использованием
 7. Обрабатывай возможные ошибки (NaN, типы данных и т.д.)
 8. Возвращай ТОЛЬКО код Python, без объяснений и markdown разметки
-9. Не используй print() если не требуется явный вывод
+9. **ОБЯЗАТЕЛЬНО используй print() для коротких объяснений:**
+   - Объясни ЧТО ты делаешь (1-2 предложения)
+   - Проанализируй результат (выводы, интересные находки)
+   - Пиши понятным языком, как будто объясняешь человеку
 10. Учитывай контекст предыдущих вопросов и ответов
 
 ВАЖНО - Форматирование результатов:
@@ -264,15 +297,31 @@ class CSVAnalysisAgentAPI:
     - НЕ ДЕЛАЙ ТАК: result = {"Заказ 1": {...}, "Заказ 2": {...}}  # ❌ НЕПРАВИЛЬНО (вложенные объекты)
 """
 
+        # Добавляем информацию о дополнительных файлах в промпт
+        available_dataframes_text = ""
+        if len(self.dataframes) > 1:
+            other_files = [name for name in self.dataframes.keys() if self.dataframes[name] is not self.current_df]
+            if other_files:
+                available_dataframes_text = f", {', '.join([f\"'{name}'\" for name in other_files])}"
+
+        system_prompt = system_prompt.replace("{available_dataframes}", available_dataframes_text)
+
         # Формируем сообщение с данными
+        files_info = ""
+        if len(self.dataframes) > 1:
+            files_info = "\n\nДоступные дополнительные файлы:\n"
+            for name, df_other in self.dataframes.items():
+                if df_other is not self.current_df:
+                    files_info += f"- '{name}': {df_other.shape[0]} строк, {df_other.shape[1]} колонок, колонки: {list(df_other.columns)}\n"
+
         user_message = f"""
-Данные CSV файла:
+Данные CSV файла (основной):
 - Колонки: {schema['columns']}
 - Типы данных: {schema['dtypes']}
 - Размер: {schema['shape']['rows']} строк, {schema['shape']['columns']} колонок
 - Пропущенные значения: {schema['missing_values']}
 - Примеры данных (первые 5 строк):
-{json.dumps(schema['sample_data'], indent=2, ensure_ascii=False)}
+{json.dumps(schema['sample_data'], indent=2, ensure_ascii=False)}{files_info}
 
 Запрос пользователя: {user_query}
 """
