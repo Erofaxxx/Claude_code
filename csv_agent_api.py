@@ -168,6 +168,23 @@ class CSVAnalysisAgentAPI:
                     result = result.tolist()
                 elif isinstance(result, (np.integer, np.floating)):
                     result = float(result)
+                elif isinstance(result, dict):
+                    # Проверяем, есть ли вложенные объекты
+                    has_nested = any(isinstance(v, dict) for v in result.values())
+                    if has_nested:
+                        # Конвертируем вложенные объекты в DataFrame для красивого отображения
+                        try:
+                            df_from_dict = pd.DataFrame(result).T  # Транспонируем для правильного формата
+                            result = {
+                                "type": "dataframe",
+                                "data": df_from_dict.to_dict(orient='records'),
+                                "columns": df_from_dict.columns.tolist(),
+                                "shape": {"rows": int(df_from_dict.shape[0]), "columns": int(df_from_dict.shape[1])},
+                                "dtypes": {col: str(dtype) for col, dtype in df_from_dict.dtypes.items()}
+                            }
+                        except:
+                            # Если не получается конвертировать в DataFrame, оставляем как есть
+                            pass
                 elif isinstance(result, str) and '\n' in result:
                     # Умная конвертация: только если это похоже на список элементов
                     lines = [line.strip() for line in result.split('\n') if line.strip()]
@@ -239,9 +256,12 @@ class CSVAnalysisAgentAPI:
 12. Для таблиц возвращай DataFrame
 13. Для одного значения возвращай число или строку
 14. НИКОГДА не используй '\\n'.join() для результата - всегда возвращай list
-15. Примеры правильного формата:
+15. Для нескольких связанных результатов используй DataFrame (НЕ вложенные словари)
+16. Примеры правильного формата:
     - Список штатов: result = df['State'].unique().tolist()  # ✅ ПРАВИЛЬНО
     - НЕ ДЕЛАЙ ТАК: result = '\\n'.join(states)  # ❌ НЕПРАВИЛЬНО
+    - Несколько результатов: result = pd.DataFrame([{...}, {...}])  # ✅ ПРАВИЛЬНО
+    - НЕ ДЕЛАЙ ТАК: result = {"Заказ 1": {...}, "Заказ 2": {...}}  # ❌ НЕПРАВИЛЬНО (вложенные объекты)
 """
 
         # Формируем сообщение с данными
