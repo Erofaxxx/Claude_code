@@ -302,7 +302,9 @@ class CSVAnalysisAgentAPI:
         if len(self.dataframes) > 1:
             other_files = [name for name in self.dataframes.keys() if self.dataframes[name] is not self.current_df]
             if other_files:
-                available_dataframes_text = f", {', '.join([f\"'{name}'\" for name in other_files])}"
+                # Формируем список имен файлов с кавычками
+                names_quoted = [f"'{name}'" for name in other_files]
+                available_dataframes_text = f", {', '.join(names_quoted)}"
 
         system_prompt = system_prompt.replace("{available_dataframes}", available_dataframes_text)
 
