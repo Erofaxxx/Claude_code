@@ -140,6 +140,23 @@ const renderResultData = (resultData: any) => {
     );
   }
 
+  // Если это строка с переносами строк - конвертируем в список
+  if (typeof resultData === 'string' && resultData.includes('\n')) {
+    const lines = resultData.split('\n').filter(line => line.trim());
+    if (lines.length > 1) {
+      return (
+        <div className="my-2">
+          <p className="text-sm text-gray-600 mb-2">📊 Найденные элементы ({lines.length}):</p>
+          <ul className="list-disc list-inside space-y-1">
+            {lines.map((line: string, idx: number) => (
+              <li key={idx} className="text-gray-800">{line.trim()}</li>
+            ))}
+          </ul>
+        </div>
+      );
+    }
+  }
+
   // Если это простое значение (число, строка, булево)
   if (typeof resultData === 'string' || typeof resultData === 'number' || typeof resultData === 'boolean') {
     return (

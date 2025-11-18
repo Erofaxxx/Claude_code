@@ -168,6 +168,12 @@ class CSVAnalysisAgentAPI:
                     result = result.tolist()
                 elif isinstance(result, (np.integer, np.floating)):
                     result = float(result)
+                elif isinstance(result, str) and '\n' in result:
+                    # Автоматически конвертируем строки с переносами в список
+                    # Это улучшит отображение на фронтенде
+                    lines = [line.strip() for line in result.split('\n') if line.strip()]
+                    if len(lines) > 1:  # Если это действительно список, а не просто текст
+                        result = lines
 
                 # Сохраняем графики в base64
                 if plt.get_fignums():
@@ -224,6 +230,15 @@ class CSVAnalysisAgentAPI:
 8. Возвращай ТОЛЬКО код Python, без объяснений и markdown разметки
 9. Не используй print() если не требуется явный вывод
 10. Учитывай контекст предыдущих вопросов и ответов
+
+ВАЖНО - Форматирование результатов:
+11. Для списка значений ВСЕГДА возвращай list или Series (НЕ строку с \\n)
+12. Для таблиц возвращай DataFrame
+13. Для одного значения возвращай число или строку
+14. НИКОГДА не используй '\\n'.join() для результата - всегда возвращай list
+15. Примеры правильного формата:
+    - Список штатов: result = df['State'].unique().tolist()  # ✅ ПРАВИЛЬНО
+    - НЕ ДЕЛАЙ ТАК: result = '\\n'.join(states)  # ❌ НЕПРАВИЛЬНО
 """
 
         # Формируем сообщение с данными
