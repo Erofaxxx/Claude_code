@@ -266,6 +266,14 @@ class CSVAnalysisAgentAPI:
 
    # Удаляем строки где все значения NaN
    df = df.dropna(how='all')
+
+   # Удаляем полностью пустые столбцы (включая Unnamed с NaN)
+   df = df.dropna(axis=1, how='all')
+
+   # Удаляем столбцы где название "Unnamed" И все значения NaN
+   cols_to_drop = [col for col in df.columns if 'Unnamed' in str(col) and df[col].isna().all()]
+   if cols_to_drop:
+       df = df.drop(columns=cols_to_drop)
    ```
 7b. **ВСЕГДА** показывай диагностическую информацию:
    ```python
