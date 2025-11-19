@@ -65,7 +65,8 @@ class CSVAnalysisAgentAPI:
             DataFrame с данными
         """
         try:
-            df = pd.read_csv(io.BytesIO(file_bytes))
+            # Автоопределение разделителя (поддержка , и ; и других)
+            df = pd.read_csv(io.BytesIO(file_bytes), sep=None, engine='python')
             self.current_df = df
             # Сохраняем в хранилище множественных файлов
             clean_name = Path(filename).stem  # Убираем расширение
@@ -107,7 +108,8 @@ class CSVAnalysisAgentAPI:
             DataFrame
         """
         try:
-            df = pd.read_csv(file_path)
+            # Автоопределение разделителя (поддержка , и ; и других)
+            df = pd.read_csv(file_path, sep=None, engine='python')
             self.current_df = df
             return df
         except Exception as e:
