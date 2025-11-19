@@ -249,6 +249,40 @@ class CSVAnalysisAgentAPI:
 6. Обрабатывай возможные ошибки (NaN, типы данных и т.д.)
 7. Возвращай ТОЛЬКО код Python, без объяснений и markdown разметки
 
+КРИТИЧЕСКИ ВАЖНО - Очистка данных:
+7a. **ВСЕГДА** начинай с очистки данных:
+   ```python
+   # Удаляем полностью пустые строки
+   df = df.dropna(how='all')
+
+   # Если первая строка содержит заголовки (а текущие заголовки - Unnamed), обнови их
+   if 'Unnamed' in str(df.columns):
+       # Ищем строку с настоящими заголовками
+       for i in range(min(5, len(df))):
+           if df.iloc[i].notna().sum() > len(df.columns) * 0.5:  # Больше 50% непустых
+               df.columns = df.iloc[i].values
+               df = df.iloc[i+1:].reset_index(drop=True)
+               break
+
+   # Удаляем строки где все значения NaN
+   df = df.dropna(how='all')
+   ```
+7b. **ВСЕГДА** показывай диагностическую информацию:
+   ```python
+   print(f"Очищенные данные: {len(df)} строк")
+   print(f"Колонки: {list(df.columns)}")
+   print(f"Первые 3 строки:\\n{df.head(3)}")
+   ```
+7c. При поиске колонок используй case-insensitive поиск и частичное совпадение:
+   ```python
+   # Пример: найти колонку с "revenue" или "выручка"
+   revenue_col = None
+   for col in df.columns:
+       if 'revenue' in str(col).lower() or 'выручка' in str(col).lower():
+           revenue_col = col
+           break
+   ```
+
 ВАЖНО - Форматирование результата:
 8. **ОБЯЗАТЕЛЬНО** возвращай результат в переменной 'result' как **Markdown строку**
 9. Используй Markdown для красивого форматирования:
