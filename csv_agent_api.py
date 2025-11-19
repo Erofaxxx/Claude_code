@@ -183,47 +183,16 @@ class CSVAnalysisAgentAPI:
                 output = stdout_capture.getvalue()
 
                 # Конвертируем результат в JSON-serializable формат
-                if isinstance(result, pd.DataFrame):
-                    # Возвращаем DataFrame с метаданными для правильного отображения таблиц
-                    result = {
-                        "type": "dataframe",
-                        "data": result.to_dict(orient='records'),
-                        "columns": result.columns.tolist(),
-                        "shape": {"rows": int(result.shape[0]), "columns": int(result.shape[1])},
-                        "dtypes": {col: str(dtype) for col, dtype in result.dtypes.items()}
-                    }
-                elif isinstance(result, pd.Series):
-                    result = result.to_dict()
+                # Теперь result - это Markdown строка, оставляем как есть
+                # Нужно только обработать специальные типы Python
+                if isinstance(result, (np.integer, np.floating)):
+                    result = float(result)
                 elif isinstance(result, np.ndarray):
                     result = result.tolist()
-                elif isinstance(result, (np.integer, np.floating)):
-                    result = float(result)
-                elif isinstance(result, dict):
-                    # Проверяем, есть ли вложенные объекты
-                    has_nested = any(isinstance(v, dict) for v in result.values())
-                    if has_nested:
-                        # Конвертируем вложенные объекты в DataFrame для красивого отображения
-                        try:
-                            df_from_dict = pd.DataFrame(result).T  # Транспонируем для правильного формата
-                            result = {
-                                "type": "dataframe",
-                                "data": df_from_dict.to_dict(orient='records'),
-                                "columns": df_from_dict.columns.tolist(),
-                                "shape": {"rows": int(df_from_dict.shape[0]), "columns": int(df_from_dict.shape[1])},
-                                "dtypes": {col: str(dtype) for col, dtype in df_from_dict.dtypes.items()}
-                            }
-                        except:
-                            # Если не получается конвертировать в DataFrame, оставляем как есть
-                            pass
-                elif isinstance(result, str) and '\n' in result:
-                    # Умная конвертация: только если это похоже на список элементов
-                    lines = [line.strip() for line in result.split('\n') if line.strip()]
-                    # Конвертируем только если:
-                    # - Больше 3 строк (список, а не просто 2 строки текста)
-                    # - Все строки короткие (<150 символов - не параграфы)
-                    # Иначе это текстовый вывод, который нужно сохранить как есть
-                    if len(lines) > 3 and all(len(line) < 150 for line in lines):
-                        result = lines
+                elif isinstance(result, pd.DataFrame) or isinstance(result, pd.Series):
+                    # Если AI вернул DataFrame вместо Markdown - конвертируем в строку
+                    result = str(result)
+                # Все остальное (строки, числа, списки) оставляем как есть
 
                 # Сохраняем графики в base64
                 if plt.get_fignums():
@@ -272,29 +241,55 @@ class CSVAnalysisAgentAPI:
 Правила:
 1. Используй только библиотеки: pandas, numpy, matplotlib, seaborn
 2. Доступные DataFrame'ы: 'df' (основной){available_dataframes}
-3. Если нужно вернуть результат, сохрани его в переменную 'result'
-4. Для визуализации используй matplotlib/seaborn
-5. Код должен быть безопасным и эффективным
-6. Всегда проверяй существование колонок перед использованием
-7. Обрабатывай возможные ошибки (NaN, типы данных и т.д.)
-8. Возвращай ТОЛЬКО код Python, без объяснений и markdown разметки
-9. **ОБЯЗАТЕЛЬНО используй print() для коротких объяснений:**
-   - Объясни ЧТО ты делаешь (1-2 предложения)
-   - Проанализируй результат (выводы, интересные находки)
-   - Пиши понятным языком, как будто объясняешь человеку
-10. Учитывай контекст предыдущих вопросов и ответов
+3. Для визуализации используй matplotlib/seaborn
+4. Код должен быть безопасным и эффективным
+5. Всегда проверяй существование колонок перед использованием
+6. Обрабатывай возможные ошибки (NaN, типы данных и т.д.)
+7. Возвращай ТОЛЬКО код Python, без объяснений и markdown разметки
 
-ВАЖНО - Форматирование результатов:
-11. Для списка значений ВСЕГДА возвращай list или Series (НЕ строку с \\n)
-12. Для таблиц возвращай DataFrame
-13. Для одного значения возвращай число или строку
-14. НИКОГДА не используй '\\n'.join() для результата - всегда возвращай list
-15. Для нескольких связанных результатов используй DataFrame (НЕ вложенные словари)
-16. Примеры правильного формата:
-    - Список штатов: result = df['State'].unique().tolist()  # ✅ ПРАВИЛЬНО
-    - НЕ ДЕЛАЙ ТАК: result = '\\n'.join(states)  # ❌ НЕПРАВИЛЬНО
-    - Несколько результатов: result = pd.DataFrame([{...}, {...}])  # ✅ ПРАВИЛЬНО
-    - НЕ ДЕЛАЙ ТАК: result = {"Заказ 1": {...}, "Заказ 2": {...}}  # ❌ НЕПРАВИЛЬНО (вложенные объекты)
+ВАЖНО - Форматирование результата:
+8. **ОБЯЗАТЕЛЬНО** возвращай результат в переменной 'result' как **Markdown строку**
+9. Используй Markdown для красивого форматирования:
+   - Заголовки: ## Заголовок, ### Подзаголовок
+   - Таблицы: | Колонка | Значение | (с разделителями |---|---|)
+   - Списки: - элемент или 1. элемент
+   - Выделение: **жирный**, *курсив*
+   - Разделители: --- для горизонтальной линии
+10. Структура Markdown ответа:
+    - Начни с краткого объяснения (1-2 предложения)
+    - Используй заголовки для разделов
+    - Выводи данные в таблицах или списках
+    - Добавь выводы и анализ в конце
+11. Графики выводи через plt.show() как обычно (отдельно от result)
+
+Пример хорошего результата:
+```python
+# Анализируем данные
+total = df['Revenue'].sum()
+avg = df['Revenue'].mean()
+
+# Формируем результат в Markdown
+result = f\"\"\"
+## Анализ продаж
+
+Проанализировал данные по {len(df)} записям.
+
+### Основные метрики
+
+| Метрика | Значение |
+|---------|----------|
+| Общая выручка | ${total:,.2f} |
+| Средняя выручка | ${avg:,.2f} |
+
+### Топ-5 стран по выручке
+
+{df.groupby('Country')['Revenue'].sum().nlargest(5).to_markdown()}
+
+---
+
+**Вывод:** Бизнес показывает стабильный рост с рентабельностью 29.5%
+\"\"\"
+```
 """
 
         # Добавляем информацию о дополнительных файлах в промпт
