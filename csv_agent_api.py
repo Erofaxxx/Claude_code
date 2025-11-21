@@ -417,7 +417,28 @@ result = f\"\"\"
             return code.strip()
 
         except Exception as e:
-            raise Exception(f"Ошибка при генерации кода: {str(e)}")
+            error_msg = str(e)
+
+            # Улучшенная диагностика ошибок аутентификации
+            if "401" in error_msg or "Unauthorized" in error_msg or "User not found" in error_msg:
+                raise Exception(
+                    f"Ошибка аутентификации OpenRouter (401): API ключ неверный или истек. "
+                    f"Проверьте OPENROUTER_API_KEY в .env файле. "
+                    f"Получите новый ключ на https://openrouter.ai/keys. "
+                    f"Детали: {error_msg}"
+                )
+            elif "403" in error_msg:
+                raise Exception(
+                    f"Доступ запрещен (403): У API ключа нет доступа к модели {self.model} "
+                    f"или недостаточно кредитов. Детали: {error_msg}"
+                )
+            elif "429" in error_msg:
+                raise Exception(
+                    f"Превышен лимит запросов (429): Слишком много запросов к API. "
+                    f"Подождите немного и попробуйте снова. Детали: {error_msg}"
+                )
+            else:
+                raise Exception(f"Ошибка при генерации кода: {error_msg}")
 
     def analyze(self, user_query: str, chat_history: List[Dict] = None) -> Dict[str, Any]:
         """

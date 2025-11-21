@@ -43,6 +43,18 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 if not OPENROUTER_API_KEY:
     raise ValueError("OPENROUTER_API_KEY не найден в переменных окружения")
 
+# Валидация формата API ключа
+OPENROUTER_API_KEY = OPENROUTER_API_KEY.strip()  # Убираем лишние пробелы
+
+if not OPENROUTER_API_KEY.startswith("sk-"):
+    raise ValueError(
+        f"OPENROUTER_API_KEY имеет неверный формат. "
+        f"Ключ должен начинаться с 'sk-'. "
+        f"Текущий ключ начинается с: '{OPENROUTER_API_KEY[:10]}...'"
+    )
+
+print(f"✓ OpenRouter API ключ загружен: {OPENROUTER_API_KEY[:10]}...{OPENROUTER_API_KEY[-4:]}")
+
 
 # Pydantic модели для валидации
 class AnalyzeRequest(BaseModel):
