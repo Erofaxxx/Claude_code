@@ -22,18 +22,68 @@ import seaborn as sns
 from openai import OpenAI
 
 
+# Конфигурация доступных моделей
+AVAILABLE_MODELS = {
+    "claude-sonnet-4.5": {
+        "id": "anthropic/claude-sonnet-4.5",
+        "name": "Claude Sonnet 4.5",
+        "provider": "Anthropic",
+        "description": "Лучшая модель для сложного анализа данных и генерации кода",
+        "context_length": 200000,
+        "recommended": True
+    },
+    "gpt-4o": {
+        "id": "openai/gpt-4o",
+        "name": "GPT-4o",
+        "provider": "OpenAI",
+        "description": "Мощная модель от OpenAI с отличным пониманием данных",
+        "context_length": 128000,
+        "recommended": True
+    },
+    "deepseek-chat": {
+        "id": "deepseek/deepseek-chat",
+        "name": "DeepSeek Chat",
+        "provider": "DeepSeek",
+        "description": "Быстрая и эффективная модель для анализа данных",
+        "context_length": 64000,
+        "recommended": False
+    },
+    "qwen-2.5-72b": {
+        "id": "qwen/qwen-2.5-72b-instruct",
+        "name": "Qwen 2.5 72B",
+        "provider": "Alibaba",
+        "description": "Открытая модель с отличным качеством",
+        "context_length": 32000,
+        "recommended": False
+    },
+    "llama-3.3-70b": {
+        "id": "meta-llama/llama-3.3-70b-instruct",
+        "name": "Llama 3.3 70B",
+        "provider": "Meta",
+        "description": "Открытая модель от Meta с хорошими аналитическими способностями",
+        "context_length": 128000,
+        "recommended": False
+    }
+}
+
+# Модель по умолчанию
+DEFAULT_MODEL = "claude-sonnet-4.5"
+
+
 class CSVAnalysisAgentAPI:
     """
     API-версия агента для анализа CSV файлов
     Поддерживает историю диалога и возвращает результаты в формате API
     """
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL):
         """
         Инициализация агента
 
         Args:
             api_key: API ключ для OpenRouter
+            model: Короткое имя модели (например, "claude-sonnet-4.5", "gpt-4o")
+                   По умолчанию используется Claude Sonnet 4.5
         """
         self.api_key = api_key
 
@@ -43,7 +93,17 @@ class CSVAnalysisAgentAPI:
             api_key=api_key
         )
 
-        self.model = "anthropic/claude-sonnet-4.5"
+        # Проверка и установка модели
+        if model not in AVAILABLE_MODELS:
+            raise ValueError(
+                f"Модель '{model}' не поддерживается. "
+                f"Доступные модели: {', '.join(AVAILABLE_MODELS.keys())}"
+            )
+
+        self.model_key = model  # Короткое имя (ключ)
+        self.model = AVAILABLE_MODELS[model]["id"]  # Полный ID для API
+        self.model_info = AVAILABLE_MODELS[model]  # Полная информация о модели
+
         self.current_df = None
         self.dataframes = {}  # Хранилище для множественных DataFrame: {filename: df}
         self.max_retries = 3
