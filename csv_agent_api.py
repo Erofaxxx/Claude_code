@@ -1,5 +1,6 @@
 """
 API-версия CSV Analysis Agent для интеграции с внешними сервисами
+Julius.ai style - многоэтапный анализ с красивым выводом результатов
 Поддерживает историю диалога и возвращает результаты в JSON с base64 изображениями
 """
 
@@ -72,7 +73,7 @@ DEFAULT_MODEL = "claude-sonnet-4.5"
 
 class CSVAnalysisAgentAPI:
     """
-    API-версия агента для анализа CSV файлов
+    API-версия агента для анализа CSV файлов (Julius.ai style)
     Поддерживает историю диалога и возвращает результаты в формате API
     """
 
@@ -105,17 +106,149 @@ class CSVAnalysisAgentAPI:
         self.model_info = AVAILABLE_MODELS[model]  # Полная информация о модели
 
         self.current_df = None
+        self.original_df = None  # Храним оригинал
         self.dataframes = {}  # Хранилище для множественных DataFrame: {filename: df}
         self.max_retries = 3
+
+        # Метаданные о данных
+        self.data_metadata = {
+            "has_unnamed_columns": False,
+            "first_row_is_header": False,
+            "columns_cleaned": False,
+            "rows_removed": 0,
+            "cols_removed": 0
+        }
 
         # Настройки для графиков
         sns.set_style("whitegrid")
         plt.rcParams['figure.figsize'] = (10, 6)
         plt.rcParams['figure.dpi'] = 100
 
+    def _is_first_row_header(self, df: pd.DataFrame) -> bool:
+        """
+        Определяем является ли первая строка заголовком
+
+        Критерии:
+        1. Текущие колонки типа "Unnamed: 0", "Unnamed: 1"...
+        2. Первая строка содержит текстовые значения (потенциальные названия)
+        3. Вторая строка содержит числовые/смешанные значения (данные)
+        """
+        # Проверка 1: Много Unnamed колонок?
+        unnamed_count = sum(1 for col in df.columns if 'Unnamed' in str(col))
+        if unnamed_count < len(df.columns) * 0.3:  # Меньше 30% unnamed
+            return False
+
+        # Проверка 2: Первая строка - текст?
+        if len(df) < 2:
+            return False
+
+        first_row = df.iloc[0]
+        second_row = df.iloc[1]
+
+        # Считаем текстовые значения в первой строке
+        text_count_row1 = sum(1 for val in first_row if isinstance(val, str) and not str(val).replace('.', '').replace('-', '').isdigit())
+
+        # Считаем числовые значения во второй строке
+        numeric_count_row2 = sum(1 for val in second_row if pd.notna(val) and (isinstance(val, (int, float)) or str(val).replace('.', '').replace('-', '').isdigit()))
+
+        # Если первая строка преимущественно текст, а вторая - числа
+        return text_count_row1 > len(first_row) * 0.5 and numeric_count_row2 > len(second_row) * 0.3
+
+    def smart_load_csv(self, file_bytes: bytes, filename: str = "data.csv") -> Dict[str, Any]:
+        """
+        Умная загрузка CSV с автоматическим анализом структуры
+        Работает как Julius.ai - сначала понимает структуру, потом очищает
+
+        Returns:
+            Dict с информацией о загрузке и очистке
+        """
+        load_info = {
+            "filename": filename,
+            "steps": [],
+            "warnings": [],
+            "original_shape": None,
+            "final_shape": None,
+            "success": True
+        }
+
+        try:
+            # ШАГ 1: Загружаем "как есть"
+            df_raw = pd.read_csv(io.BytesIO(file_bytes), sep=None, engine='python')
+            self.original_df = df_raw.copy()
+            load_info["original_shape"] = df_raw.shape
+            load_info["steps"].append(f"📥 Загружено: {df_raw.shape[0]} строк × {df_raw.shape[1]} колонок")
+
+            # ШАГ 2: Проверяем "Unnamed" колонки
+            unnamed_cols = [col for col in df_raw.columns if 'Unnamed' in str(col)]
+            if unnamed_cols:
+                self.data_metadata["has_unnamed_columns"] = True
+                load_info["warnings"].append(
+                    f"⚠️ Найдено {len(unnamed_cols)} колонок типа 'Unnamed'. "
+                    f"Возможно первая строка - это заголовки."
+                )
+                load_info["steps"].append(f"🔍 Обнаружено {len(unnamed_cols)} безымянных колонок")
+
+            # ШАГ 3: Проверяем первую строку - может это заголовки?
+            if self._is_first_row_header(df_raw):
+                self.data_metadata["first_row_is_header"] = True
+                load_info["steps"].append("🎯 Обнаружено: первая строка - это заголовки данных")
+
+                # Делаем первую строку заголовком
+                new_columns = df_raw.iloc[0].tolist()
+                df_raw.columns = new_columns
+                df_raw = df_raw.iloc[1:].reset_index(drop=True)
+
+                load_info["steps"].append("✅ Первая строка преобразована в заголовки")
+
+            # ШАГ 4: Очищаем названия колонок от пробелов
+            original_cols = list(df_raw.columns)
+            df_raw.columns = df_raw.columns.astype(str).str.strip()
+            cleaned_cols = list(df_raw.columns)
+
+            if original_cols != cleaned_cols:
+                self.data_metadata["columns_cleaned"] = True
+                load_info["steps"].append("🧹 Очищены названия колонок от лишних пробелов")
+
+            # ШАГ 5: Удаляем полностью пустые строки
+            rows_before = len(df_raw)
+            df_raw = df_raw.dropna(how='all')
+            rows_after = len(df_raw)
+            rows_removed = rows_before - rows_after
+
+            if rows_removed > 0:
+                self.data_metadata["rows_removed"] = rows_removed
+                load_info["steps"].append(f"🗑️ Удалено {rows_removed} пустых строк")
+
+            # ШАГ 6: Удаляем полностью пустые колонки
+            cols_before = len(df_raw.columns)
+            df_raw = df_raw.dropna(axis=1, how='all')
+            cols_after = len(df_raw.columns)
+            cols_removed = cols_before - cols_after
+
+            if cols_removed > 0:
+                self.data_metadata["cols_removed"] = cols_removed
+                load_info["steps"].append(f"🗑️ Удалено {cols_removed} пустых колонок")
+
+            # Сохраняем результат
+            self.current_df = df_raw.reset_index(drop=True)
+            clean_name = Path(filename).stem
+            self.dataframes[clean_name] = self.current_df
+
+            load_info["final_shape"] = self.current_df.shape
+            load_info["steps"].append(
+                f"✅ Итого: {self.current_df.shape[0]} строк × {self.current_df.shape[1]} колонок"
+            )
+
+            return load_info
+
+        except Exception as e:
+            load_info["success"] = False
+            load_info["error"] = str(e)
+            raise Exception(f"Ошибка при загрузке CSV файла '{filename}': {str(e)}")
+
     def load_csv_from_bytes(self, file_bytes: bytes, filename: str = "data.csv") -> pd.DataFrame:
         """
-        Загрузить CSV из байтов
+        Загрузить CSV из байтов (с умной очисткой)
 
         Args:
             file_bytes: Байты CSV файла
@@ -124,16 +257,8 @@ class CSVAnalysisAgentAPI:
         Returns:
             DataFrame с данными
         """
-        try:
-            # Автоопределение разделителя (поддержка , и ; и других)
-            df = pd.read_csv(io.BytesIO(file_bytes), sep=None, engine='python')
-            self.current_df = df
-            # Сохраняем в хранилище множественных файлов
-            clean_name = Path(filename).stem  # Убираем расширение
-            self.dataframes[clean_name] = df
-            return df
-        except Exception as e:
-            raise Exception(f"Ошибка при загрузке CSV файла '{filename}': {str(e)}")
+        self.smart_load_csv(file_bytes, filename)
+        return self.current_df
 
     def load_multiple_csv(self, files_data: List[Tuple[bytes, str]]) -> Dict[str, pd.DataFrame]:
         """
@@ -147,9 +272,9 @@ class CSVAnalysisAgentAPI:
         """
         loaded = {}
         for file_bytes, filename in files_data:
-            df = self.load_csv_from_bytes(file_bytes, filename)
+            self.smart_load_csv(file_bytes, filename)
             clean_name = Path(filename).stem
-            loaded[clean_name] = df
+            loaded[clean_name] = self.dataframes[clean_name]
 
         # Первый файл - основной
         if files_data:
@@ -167,13 +292,9 @@ class CSVAnalysisAgentAPI:
         Returns:
             DataFrame
         """
-        try:
-            # Автоопределение разделителя (поддержка , и ; и других)
-            df = pd.read_csv(file_path, sep=None, engine='python')
-            self.current_df = df
-            return df
-        except Exception as e:
-            raise Exception(f"Ошибка при загрузке CSV файла: {str(e)}")
+        with open(file_path, 'rb') as f:
+            file_bytes = f.read()
+        return self.load_csv_from_bytes(file_bytes, os.path.basename(file_path))
 
     def analyze_csv_schema(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -191,7 +312,8 @@ class CSVAnalysisAgentAPI:
             "shape": {"rows": int(df.shape[0]), "columns": int(df.shape[1])},
             "missing_values": {col: int(count) for col, count in df.isnull().sum().items()},
             "sample_data": df.head(5).to_dict(orient='records'),
-            "summary_stats": {}
+            "summary_stats": {},
+            "metadata": self.data_metadata
         }
 
         # Статистика для числовых колонок
@@ -245,8 +367,6 @@ class CSVAnalysisAgentAPI:
                 output = stdout_capture.getvalue()
 
                 # Конвертируем результат в JSON-serializable формат
-                # Теперь result - это Markdown строка, оставляем как есть
-                # Нужно только обработать специальные типы Python
                 if isinstance(result, (np.integer, np.floating)):
                     result = float(result)
                 elif isinstance(result, np.ndarray):
@@ -254,7 +374,6 @@ class CSVAnalysisAgentAPI:
                 elif isinstance(result, pd.DataFrame) or isinstance(result, pd.Series):
                     # Если AI вернул DataFrame вместо Markdown - конвертируем в строку
                     result = str(result)
-                # Все остальное (строки, числа, списки) оставляем как есть
 
                 # Сохраняем графики в base64
                 if plt.get_fignums():
@@ -286,7 +405,7 @@ class CSVAnalysisAgentAPI:
                                  chat_history: List[Dict] = None,
                                  previous_error: Optional[str] = None) -> str:
         """
-        Генерация Python кода с помощью Claude с учетом истории
+        Генерация Python кода с помощью AI (Julius.ai style - многоэтапный подход)
 
         Args:
             user_query: Запрос пользователя
@@ -297,144 +416,211 @@ class CSVAnalysisAgentAPI:
         Returns:
             Сгенерированный Python код
         """
-        system_prompt = """Ты - эксперт по анализу данных на Python.
-Твоя задача - писать качественный Python код для анализа CSV данных.
+        system_prompt = """Ты эксперт-аналитик данных, работающий как Julius.ai.
 
-Правила:
-1. Используй только библиотеки: pandas, numpy, matplotlib, seaborn
-2. Доступные DataFrame'ы: 'df' (основной){available_dataframes}
-3. Для визуализации используй matplotlib/seaborn
-4. Код должен быть безопасным и эффективным
-5. Всегда проверяй существование колонок перед использованием
-6. Обрабатывай возможные ошибки (NaN, типы данных и т.д.)
-7. Возвращай ТОЛЬКО код Python, без объяснений и markdown разметки
+🎯 ТВОЯ ЗАДАЧА: Писать код который работает ПОЭТАПНО и ЛОГИРУЕТ каждый шаг.
 
-КРИТИЧЕСКИ ВАЖНО - Очистка данных:
-7a. **ВСЕГДА** начинай с очистки данных:
-   ```python
-   # Удаляем полностью пустые строки
-   df = df.dropna(how='all')
+📋 ОБЯЗАТЕЛЬНАЯ СТРУКТУРА КОДА:
 
-   # Если первая строка содержит заголовки (а текущие заголовки - Unnamed), обнови их
-   if 'Unnamed' in str(df.columns):
-       # Ищем строку с настоящими заголовками
-       for i in range(min(5, len(df))):
-           if df.iloc[i].notna().sum() > len(df.columns) * 0.5:  # Больше 50% непустых
-               df.columns = df.iloc[i].values
-               df = df.iloc[i+1:].reset_index(drop=True)
-               break
-
-   # Удаляем строки где все значения NaN
-   df = df.dropna(how='all')
-   ```
-7b. **ВСЕГДА** показывай диагностическую информацию:
-   ```python
-   print(f"Очищенные данные: {len(df)} строк")
-   print(f"Колонки: {list(df.columns)}")
-   print(f"Первые 3 строки:\\n{df.head(3)}")
-   ```
-7c. При поиске колонок используй case-insensitive поиск и частичное совпадение:
-   ```python
-   # Пример: найти колонку с "revenue" или "выручка"
-   revenue_col = None
-   for col in df.columns:
-       if 'revenue' in str(col).lower() or 'выручка' in str(col).lower():
-           revenue_col = col
-           break
-   ```
-
-ВАЖНО - Форматирование результата:
-8. **ОБЯЗАТЕЛЬНО** возвращай результат в переменной 'result' как **Markdown строку**
-9. Используй Markdown для красивого форматирования:
-   - Заголовки: ## Заголовок, ### Подзаголовок
-   - Таблицы: | Колонка | Значение | (с разделителями |---|---|)
-   - Списки: - элемент или 1. элемент
-   - Выделение: **жирный**, *курсив*
-   - Разделители: --- для горизонтальной линии
-10. Структура Markdown ответа:
-    - Начни с краткого объяснения (1-2 предложения)
-    - Используй заголовки для разделов
-    - Выводи данные в таблицах или списках
-    - Добавь выводы и анализ в конце
-11. Графики выводи через plt.show() как обычно (отдельно от result)
-12. **НЕ ДУБЛИРУЙ результат!** Используй print() ТОЛЬКО для процесса работы, НЕ для финального результата:
-    - ✅ ПРАВИЛЬНО: print("Анализирую данные...") в начале
-    - ❌ НЕПРАВИЛЬНО: print(result) в конце
-    - Финальный результат должен быть ТОЛЬКО в переменной result
-
-Пример хорошего результата:
 ```python
-# Логи процесса (будут показаны отдельно в text_output)
-print("Анализирую данные о продажах...")
-print(f"Загружено {len(df)} записей")
+# === ШАГ 1: ПОНИМАНИЕ ДАННЫХ ===
+print("🔍 ШАГ 1: Изучаю структуру данных...")
+print(f"Размер данных: {len(df)} строк, {len(df.columns)} колонок")
+print(f"Колонки: {list(df.columns)}")
 
-# Анализируем данные
-total = df['Revenue'].sum()
-avg = df['Revenue'].mean()
+# === ШАГ 2: ПРОВЕРКА И ОЧИСТКА ===
+print("\\n🧹 ШАГ 2: Проверяю качество данных...")
 
-print("Расчеты завершены, формирую отчет...")
+# Ищем нужные колонки (гибкий поиск)
+def find_column(df, keywords):
+    for col in df.columns:
+        col_lower = str(col).lower()
+        if any(keyword.lower() in col_lower for keyword in keywords):
+            return col
+    return None
 
-# Формируем ТОЛЬКО результат в Markdown (НЕ выводим через print!)
-result = f\"\"\"
-## Анализ продаж
+year_col = find_column(df, ['year', 'год', 'date'])
+amount_col = find_column(df, ['amount', 'сумма', 'total', 'value'])
 
-Проанализировал данные по {len(df)} записям.
+if not year_col or not amount_col:
+    result = f"❌ Ошибка: не найдены нужные колонки. Доступные: {list(df.columns)}"
+else:
+    print(f"✅ Найдены колонки: {year_col}, {amount_col}")
 
-### Основные метрики
+    # Преобразуем типы данных
+    df[year_col] = pd.to_numeric(df[year_col], errors='coerce')
+    df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
 
-| Метрика | Значение |
-|---------|----------|
-| Общая выручка | ${total:,.2f} |
-| Средняя выручка | ${avg:,.2f} |
+    # Удаляем строки с пустыми значениями
+    df_clean = df.dropna(subset=[year_col, amount_col])
+    print(f"✅ Данные очищены: {len(df_clean)} валидных строк")
 
-### Топ-5 стран по выручке
+    # === ШАГ 3: АНАЛИЗ ===
+    print("\\n📊 ШАГ 3: Выполняю анализ...")
 
-{df.groupby('Country')['Revenue'].sum().nlargest(5).to_markdown()}
+    # Группировка и агрегация
+    result_df = df_clean.groupby(year_col)[amount_col].sum().reset_index()
+    result_df = result_df.sort_values(year_col)
 
----
+    print(f"✅ Агрегировано: {len(result_df)} групп")
 
-**Вывод:** Бизнес показывает стабильный рост с рентабельностью 29.5%
+    # === ШАГ 4: ВИЗУАЛИЗАЦИЯ ===
+    print("\\n📈 ШАГ 4: Создаю визуализацию...")
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(result_df[year_col], result_df[amount_col],
+             marker='o', linewidth=2, markersize=8)
+    plt.title('Динамика показателей', fontsize=16, fontweight='bold')
+    plt.xlabel(year_col, fontsize=12)
+    plt.ylabel(amount_col, fontsize=12)
+    plt.grid(True, alpha=0.3)
+
+    # Форматируем ось Y с запятыми
+    ax = plt.gca()
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:,.0f}'))
+
+    plt.tight_layout()
+    print("✅ График создан")
+
+    # === ШАГ 5: ФОРМАТИРОВАННЫЙ РЕЗУЛЬТАТ ===
+    print("\\n✅ ШАГ 5: Формирую финальный отчет...")
+
+    # Создаем таблицу с форматированными числами
+    display_df = result_df.copy()
+    display_df[amount_col] = display_df[amount_col].apply(lambda x: f"{x:,.0f}")
+
+    # Выводим таблицу
+    table_output = display_df.to_string(index=False)
+
+    # Статистика
+    total_sum = result_df[amount_col].sum()
+    avg_value = result_df[amount_col].mean()
+
+    result = f\"\"\"
+## 📊 Результаты анализа
+
+### 📈 Данные
+
+```
+{table_output}
+```
+
+### 📌 Статистика
+
+| Показатель | Значение |
+|------------|----------|
+| Всего записей | {len(df_clean)} |
+| Общая сумма | {total_sum:,.0f} |
+| Среднее значение | {avg_value:,.0f} |
+
+✅ Анализ выполнен успешно
 \"\"\"
 
-# ❌ НЕ ДЕЛАЙ ТАК: print(result)  # Создаст дубликат на фронтенде!
+    print("✅ Анализ завершен успешно!")
 ```
+
+🎯 КЛЮЧЕВЫЕ ПРАВИЛА:
+
+1. **ЛОГИРУЙ КАЖДЫЙ ШАГ** через print():
+   - Что делаешь сейчас
+   - Сколько данных обработано
+   - Какие промежуточные результаты
+
+2. **ИЩИ КОЛОНКИ ГИБКО**:
+   - Используй функцию find_column()
+   - Ищи по ключевым словам
+   - Проверяй существование
+
+3. **ПРОВЕРЯЙ ВСЁ**:
+   - Существование колонок
+   - Типы данных
+   - Пустые значения
+
+4. **ФОРМАТИРУЙ ЧИСЛА**:
+   - В таблицах: `{value:,.0f}` или `{value:,.2f}`
+   - На графиках: `plt.FuncFormatter(lambda x, p: f'{x:,.0f}')`
+
+5. **СОЗДАВАЙ КРАСИВЫЕ ТАБЛИЦЫ**:
+   - Используй `to_string(index=False)`
+   - Форматируй числа ПЕРЕД выводом
+   - Русские названия колонок
+
+6. **result В MARKDOWN**:
+   - Заголовки ##, ###
+   - Таблицы в тройных обратных кавычках ```
+   - Эмодзи для наглядности
+   - **НЕ ПЕЧАТАЙ result через print!**
+
+7. **ОБРАБОТКА ОШИБОК**:
+   - Если колонки не найдены - сообщи об этом в result
+   - Покажи какие колонки доступны
+   - Дай рекомендацию пользователю
+
+Доступные DataFrame'ы: 'df' (основной){available_dataframes}
+
+Помни: ты должен работать КАК НАСТОЯЩИЙ АНАЛИТИК - пошагово, с объяснениями, с проверками!
 """
 
         # Добавляем информацию о дополнительных файлах в промпт
         available_dataframes_text = ""
         if len(self.dataframes) > 1:
-            other_files = [name for name in self.dataframes.keys() if self.dataframes[name] is not self.current_df]
+            other_files = [name for name in self.dataframes.keys()]
             if other_files:
-                # Формируем список имен файлов с кавычками
                 names_quoted = [f"'{name}'" for name in other_files]
                 available_dataframes_text = f", {', '.join(names_quoted)}"
 
         system_prompt = system_prompt.replace("{available_dataframes}", available_dataframes_text)
 
-        # Формируем сообщение с данными
-        files_info = ""
-        if len(self.dataframes) > 1:
-            files_info = "\n\nДоступные дополнительные файлы:\n"
-            for name, df_other in self.dataframes.items():
-                if df_other is not self.current_df:
-                    files_info += f"- '{name}': {df_other.shape[0]} строк, {df_other.shape[1]} колонок, колонки: {list(df_other.columns)}\n"
+        # Формируем детальное описание данных
+        column_details = []
+        for col in schema['columns']:
+            dtype = schema['dtypes'][col]
+            missing = schema['missing_values'].get(col, 0)
+
+            # Примеры значений
+            examples = []
+            if len(schema['sample_data']) > 0:
+                for row in schema['sample_data'][:3]:
+                    val = row.get(col)
+                    if pd.notna(val):
+                        examples.append(str(val))
+
+            examples_str = ", ".join(examples[:3]) if examples else "нет данных"
+
+            col_info = f"  • '{col}' ({dtype})"
+            if missing > 0:
+                col_info += f" [⚠️ пустых: {missing}]"
+            col_info += f"\n    Примеры: {examples_str}"
+            column_details.append(col_info)
 
         user_message = f"""
-Данные CSV файла (основной):
-- Колонки: {schema['columns']}
-- Типы данных: {schema['dtypes']}
-- Размер: {schema['shape']['rows']} строк, {schema['shape']['columns']} колонок
-- Пропущенные значения: {schema['missing_values']}
-- Примеры данных (первые 5 строк):
-{json.dumps(schema['sample_data'], indent=2, ensure_ascii=False)}{files_info}
+📊 ДАННЫЕ CSV ФАЙЛА:
 
-Запрос пользователя: {user_query}
+РАЗМЕР: {schema['shape']['rows']} строк × {schema['shape']['columns']} колонок
+
+КОЛОНКИ:
+{chr(10).join(column_details)}
+
+ПРИМЕРЫ ПЕРВЫХ СТРОК:
+{json.dumps(schema['sample_data'][:3], indent=2, ensure_ascii=False)}
+
+🎯 ЗАПРОС ПОЛЬЗОВАТЕЛЯ: {user_query}
+
+⚡ ВАЖНО:
+- Логируй каждый шаг через print()
+- Ищи колонки гибко (по ключевым словам)
+- Проверяй существование колонок
+- Форматируй ВСЕ числа
+- Создавай красивые таблицы
 """
+
+        if self.data_metadata.get("first_row_is_header"):
+            user_message += "\n\n✅ ПРИМЕЧАНИЕ: Первая строка CSV была автоматически преобразована в заголовки."
 
         # Добавляем историю если есть
         if chat_history and len(chat_history) > 0:
-            history_text = "\n\nИстория предыдущих запросов и результатов:\n"
-            for i, item in enumerate(chat_history[-5:], 1):  # Последние 5 сообщений
+            history_text = "\n\nИстория предыдущих запросов:\n"
+            for i, item in enumerate(chat_history[-5:], 1):
                 history_text += f"\n{i}. Запрос: {item.get('query', '')}\n"
                 if item.get('success'):
                     history_text += f"   Результат: {item.get('text_output', '')[:200]}\n"
@@ -446,7 +632,7 @@ result = f\"\"\"
 ПРЕДЫДУЩАЯ ПОПЫТКА ЗАВЕРШИЛАСЬ ОШИБКОЙ:
 {previous_error}
 
-Исправь код, учитывая эту ошибку. Напиши исправленную версию кода.
+Исправь код, учитывая эту ошибку.
 """
 
         # Формируем сообщения для API
@@ -455,7 +641,7 @@ result = f\"\"\"
             {"role": "user", "content": user_message}
         ]
 
-        # Отправляем запрос к Claude
+        # Отправляем запрос к Claude/GPT
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -531,7 +717,8 @@ result = f\"\"\"
             "plots": [],
             "error": None,
             "attempts_count": 0,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "load_info": self.data_metadata
         }
 
         # Пробуем выполнить с повторными попытками
