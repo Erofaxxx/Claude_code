@@ -145,6 +145,7 @@ async def analyze_csv(
         JSON с результатами анализа, включая сгенерированный код,
         текстовый результат и графики в base64
     """
+    agent = None
     try:
         # Проверка формата файла
         if not file.filename.endswith('.csv'):
@@ -235,6 +236,7 @@ async def get_csv_schema(
     Returns:
         JSON со схемой данных (колонки, типы, статистика)
     """
+    agent = None
     try:
         if not file.filename.endswith('.csv'):
             raise HTTPException(
@@ -276,6 +278,11 @@ async def get_csv_schema(
             status_code=500,
             content=error_detail
         )
+    finally:
+        # Очистка памяти
+        if agent is not None:
+            agent.cleanup()
+            del agent
 
 
 @app.post("/api/quick-analyze")
@@ -317,6 +324,7 @@ async def analyze_multiple_csv(
     Returns:
         JSON с результатами анализа
     """
+    agent = None
     try:
         # Проверка что хотя бы один файл загружен
         if not files:
@@ -405,6 +413,11 @@ async def analyze_multiple_csv(
             status_code=500,
             content=error_detail
         )
+    finally:
+        # Очистка памяти
+        if agent is not None:
+            agent.cleanup()
+            del agent
 
 
 # Запуск сервера
