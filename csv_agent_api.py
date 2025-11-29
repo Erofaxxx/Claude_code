@@ -8,6 +8,7 @@ import os
 import io
 import json
 import traceback
+import gc
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import contextlib
@@ -399,7 +400,11 @@ class CSVAnalysisAgentAPI:
             error_msg = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
             return False, None, error_msg, []
         finally:
+            # Полная очистка matplotlib
             plt.close('all')
+            plt.clf()
+            # Очищаем локальные переменные
+            local_vars.clear()
 
     def generate_code_with_retry(self, user_query: str, schema: Dict,
                                  chat_history: List[Dict] = None,
@@ -795,3 +800,26 @@ else:
             "schema": schema,
             "timestamp": datetime.utcnow().isoformat()
         }
+
+    def cleanup(self):
+        """
+        Очистка памяти после использования агента
+        Вызывайте этот метод после завершения работы с агентом
+        """
+        # Удаляем все DataFrame'ы
+        if self.current_df is not None:
+            del self.current_df
+            self.current_df = None
+
+        if self.original_df is not None:
+            del self.original_df
+            self.original_df = None
+
+        if self.dataframes:
+            self.dataframes.clear()
+
+        # Закрываем все matplotlib фигуры
+        plt.close('all')
+
+        # Форсируем сборку мусора
+        gc.collect()
