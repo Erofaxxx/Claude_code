@@ -220,6 +220,11 @@ async def analyze_csv(
             status_code=500,
             content=error_detail
         )
+    finally:
+        # Очистка памяти после каждого запроса
+        if agent is not None:
+            agent.cleanup()
+            del agent
 
 
 @app.post("/api/schema")
